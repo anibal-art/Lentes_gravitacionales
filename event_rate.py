@@ -8,9 +8,11 @@ import jax
 import jax.numpy as jnp
 import scipy.integrate as integrate
 from scipy.integrate import simpson
+from jax import vmap
+from jax.scipy.integrate import trapezoid
 
 class dif_event_rate():
-    def __init__(self,t,m,D,rs,rho_c,l_coord,b_coord, uT):
+    def __init__(self,t,m,D,rs,rho_c,l_coord,b_coord, uT, is_mw):
         '''
         m (astropy quantity: M_sun): mass of the lens
         x (float): DL/DS
@@ -31,7 +33,7 @@ class dif_event_rate():
         self.l_coord = l_coord
         self.b_coord = b_coord
         self.uT = uT
-
+        self.is_mw = is_mw 
         
     def rE(self,x):
         ''' 
@@ -60,9 +62,13 @@ class dif_event_rate():
         Entradas:
         x: D_OL/D distancia a la lente normalizada por la distancia a la fuente.
         '''
-        R0 = 8.5*u.kpc
-        b, l = self.b_coord*(np.pi/180), self.l_coord*(np.pi/180)
-        return np.sqrt((x*self.D)**2 +(R0)**2 - 2*R0*self.D*x*np.cos(b)*np.cos(l))
+        if self.is_mw:
+            R0 = 8.5*u.kpc
+            b, l = self.b_coord*(np.pi/180), self.l_coord*(np.pi/180)
+            R = np.sqrt((x*self.D)**2 +(R0)**2 - 2*R0*self.D*x*np.cos(b)*np.cos(l))
+        else:
+            R = self.D*(1-x)
+        return R 
      
     def rho_NFW(self,x):
         '''
@@ -158,27 +164,76 @@ def integrand_jax(umin, x, D, rs, rho_c, t, m, l_coord, b_coord, uT):
     # print(2 * D*t**2  * rho * exp_fac * Q * vr**2 )
     return integrando*3600**2
 
+
+def integrand_jax_m31(umin, x, D, rs, rho_c, t, m, l_coord, b_coord, uT):
+    R0 = 2.622825944267662e+20
+    # Convertir grados a radianes
+    b = b_coord * jnp.pi / 180
+    l = l_coord * jnp.pi / 180
+
+    # r(x)
+    r = D*(1-x) 
+    
+    # rho_NFW
+    c = r / rs
+    rho = rho_c / (c * (1 + c)**2)
+
+    # rE(x)
+    G = 6.67430e-11  # SI
+    c_light = 299792458.0  # m/s
+    k = 4 * G / c_light**2  # SI units
+    rE = jnp.sqrt(k * m * D * x * (1 - x))  # en m
+
+    factor = -c / (1 + c) + jnp.log(1 + c)
+    Ml = 4 * jnp.pi * factor * rho_c * rs**3
+    vc = jnp.sqrt(G * Ml / (r))  # pasar r de kpc a m para SI
+    
+    # integrando
+    u_factor = jnp.sqrt(uT**2 - umin**2)
+    
+    vr = 2 * rE * u_factor / (t)  # t en horas
+    Q = (vr / vc)**2
+    exp_fac = jnp.exp(-Q)
+    f = 1.0
+    integrando = 2 * D * (1 / u_factor) * rho * exp_fac * Q * vr**2 / m
+    return integrando*3600**2
+
 # Trapecio adaptado a JAX
-def trapz_jax(y, x, axis=-1):
-    dx = jnp.diff(x)
-    shape = [1] * y.ndim
-    shape[axis] = dx.shape[0]
-    dx = dx.reshape(shape)
+# def trapz_jax(y, x, axis=-1):
+#     dx = jnp.diff(x)
+#     shape = [1] * y.ndim
+#     shape[axis] = dx.shape[0]
+#     dx = dx.reshape(shape)
 
-    y0 = jnp.take(y, indices=jnp.arange(y.shape[axis] - 1), axis=axis)
-    y1 = jnp.take(y, indices=jnp.arange(1, y.shape[axis]), axis=axis)
+#     y0 = jnp.take(y, indices=jnp.arange(y.shape[axis] - 1), axis=axis)
+#     y1 = jnp.take(y, indices=jnp.arange(1, y.shape[axis]), axis=axis)
 
-    integrand = 0.5 * (y0 + y1) * dx
-    return jnp.sum(integrand, axis=axis)
+#     integrand = 0.5 * (y0 + y1) * dx
+#     return jnp.sum(integrand, axis=axis)
 
-# Definición sin decorador
-def double_integral_2d(f, umin_range, x_range, num_u=4000, num_x=40000):
-    umin_vals = jnp.linspace(*umin_range, num=num_u)
-    x_vals = jnp.linspace(*x_range, num=num_x)
-    print(x_vals)
+# # Definición sin decorador
+# def double_integral_2d(f, umin_range, x_range, num_u=6000, num_x=60000):
+#     umin_vals = jnp.linspace(*umin_range, num=num_u)
+#     x_vals = jnp.linspace(*x_range, num=num_x)
+#     # print(x_vals)
 
-    U, X = jnp.meshgrid(umin_vals, x_vals, indexing='ij')
-    integrand_grid = f(U, X)
+#     U, X = jnp.meshgrid(umin_vals, x_vals, indexing='ij')
+#     integrand_grid = f(U, X)
 
-    integral_u = trapz_jax(integrand_grid, umin_vals, axis=0)
-    return trapz_jax(integral_u, x_vals)
+#     integral_u = trapz_jax(integrand_grid, umin_vals, axis=0)
+#     return trapz_jax(integral_u, x_vals)
+
+def double_integral_2d(f, u_bounds, x_bounds, num_u=1000, num_x=1000):
+    u_vals = jnp.linspace(*u_bounds, num_u)
+    x_vals = jnp.linspace(*x_bounds, num_x)
+
+    # Vectorize inner integral over umin
+    def inner_integral(x_val):
+        f_vals = vmap(lambda u_val: f(u_val, x_val))(u_vals)
+        return trapezoid(f_vals, u_vals)
+
+    # Vectorize outer integral over x
+    inner_vals = vmap(inner_integral)(x_vals)
+    result = trapezoid(inner_vals, x_vals)
+    return result
+
