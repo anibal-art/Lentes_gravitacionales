@@ -175,6 +175,7 @@ def trapz_jax(y, x, axis=-1):
 def double_integral_2d(f, umin_range, x_range, num_u=4000, num_x=40000):
     umin_vals = jnp.linspace(*umin_range, num=num_u)
     x_vals = jnp.linspace(*x_range, num=num_x)
+    print(x_vals)
 
     U, X = jnp.meshgrid(umin_vals, x_vals, indexing='ij')
     integrand_grid = f(U, X)
