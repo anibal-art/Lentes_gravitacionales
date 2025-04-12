@@ -131,7 +131,7 @@ def integrand_jax(umin, x, D, rs, rho_c, t, m, l_coord, b_coord, uT):
     
     # rho_NFW
     # c = r / rs
-    c = jnp.maximum(r / rs, 1e-10)
+    c = jnp.maximum(r / rs, 1e-12)
     rho = rho_c / (c * (1 + c)**2)
 
     # rE(x)
@@ -143,7 +143,7 @@ def integrand_jax(umin, x, D, rs, rho_c, t, m, l_coord, b_coord, uT):
     factor = -c / (1 + c) + jnp.log(1 + c)
     Ml = 4 * jnp.pi * factor * rho_c * rs**3
     # vc = jnp.sqrt(G * Ml / (r))  # pasar r de kpc a m para SI
-    vc = jnp.sqrt(G * Ml / jnp.maximum(r, 1e-10))
+    vc = jnp.sqrt(G * Ml / jnp.maximum(r, 1e-12))
 
     
     # integrando
@@ -152,7 +152,7 @@ def integrand_jax(umin, x, D, rs, rho_c, t, m, l_coord, b_coord, uT):
     u_factor = jnp.sqrt(jnp.maximum(u_diff_sq, 0.0))
 
     # vr = 2 * rE * u_factor / t  # t en horas
-    vr = 2 * rE * u_factor / jnp.maximum(t, 1e-10)
+    vr = 2 * rE * u_factor / jnp.maximum(t, 1e-12)
 
     Q = (vr / vc)**2
     exp_fac = jnp.exp(-Q)
