@@ -130,7 +130,8 @@ def integrand_jax(umin, x, D, rs, rho_c, t, m, l_coord, b_coord, uT):
     r = jnp.sqrt((x * D)**2 + R0**2 - 2 * R0 * D * x * jnp.cos(b) * jnp.cos(l))
     
     # rho_NFW
-    c = r / rs
+    # c = r / rs
+    c = jnp.maximum(r / rs, 1e-10)
     rho = rho_c / (c * (1 + c)**2)
 
     # rE(x)
@@ -141,12 +142,18 @@ def integrand_jax(umin, x, D, rs, rho_c, t, m, l_coord, b_coord, uT):
 
     factor = -c / (1 + c) + jnp.log(1 + c)
     Ml = 4 * jnp.pi * factor * rho_c * rs**3
-    vc = jnp.sqrt(G * Ml / (r))  # pasar r de kpc a m para SI
+    # vc = jnp.sqrt(G * Ml / (r))  # pasar r de kpc a m para SI
+    vc = jnp.sqrt(G * Ml / jnp.maximum(r, 1e-10))
+
     
     # integrando
-    u_factor = jnp.sqrt(uT**2 - umin**2)
-    
-    vr = 2 * rE * u_factor / (t)  # t en horas
+    # u_factor = jnp.sqrt(uT**2 - umin**2)
+    u_diff_sq = uT**2 - umin**2
+    u_factor = jnp.sqrt(jnp.maximum(u_diff_sq, 0.0))
+
+    # vr = 2 * rE * u_factor / t  # t en horas
+    vr = 2 * rE * u_factor / jnp.maximum(t, 1e-10)
+
     Q = (vr / vc)**2
     exp_fac = jnp.exp(-Q)
     f = 1.0
@@ -197,6 +204,8 @@ def integrand_jax_m31(umin, x, D, rs, rho_c, t, m, l_coord, b_coord, uT):
     f = 1.0
     integrando = 2 * D * (1 / u_factor) * rho * exp_fac * Q * vr**2 / m
     return integrando*3600**2
+
+
 
 # Trapecio adaptado a JAX
 # def trapz_jax(y, x, axis=-1):
